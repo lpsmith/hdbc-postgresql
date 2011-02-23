@@ -42,7 +42,7 @@ import qualified Data.ByteString.UTF8 as BUTF8
 import Control.Concurrent.MVar
 import System.IO (stderr, hPutStrLn)
 import System.IO.Unsafe (unsafePerformIO)
-import Control.Exception(bracket) 
+import Control.Exception(bracket)
 
 #include <libpq-fe.h>
 #include <pg_config.h>
@@ -80,7 +80,7 @@ connectPostgreSQL args = B.useAsCString (BUTF8.fromString args) $
 -- for clone.
 mkConn :: String -> Conn -> IO Impl.Connection
 mkConn args conn = withConn conn $
-  \cconn -> 
+  \cconn ->
     do children <- newMVar []
        begin_transaction conn children
        protover <- pqprotocolVersion cconn
@@ -97,8 +97,8 @@ mkConn args conn = withConn conn $
                             Impl.hdbcDriverName = "postgresql",
                             Impl.hdbcClientVer = clientver,
                             Impl.proxiedClientName = "postgresql",
-                            Impl.proxiedClientVer = show protover,
-                            Impl.dbServerVer = show serverver,
+                            Impl.proxiedClientVer = BUTF8.fromString (show protover),
+                            Impl.dbServerVer = BUTF8.fromString (show serverver),
                             Impl.dbTransactionSupport = True,
                             Impl.getTables = fgetTables conn children,
                             Impl.describeTable = fdescribeTable conn children}
@@ -117,14 +117,14 @@ withPostgreSQL connstr = bracket (connectPostgreSQL connstr) (disconnect)
 begin_transaction :: Conn -> ChildList -> IO ()
 begin_transaction o children = frun o children "BEGIN" [] >> return ()
 
-frunRaw :: Conn -> ChildList -> String -> IO ()
+frunRaw :: Conn -> ChildList -> B.ByteString -> IO ()
 frunRaw o children query =
     do sth <- newSth o children query
        executeRaw sth
        finish sth
        return ()
 
-frun :: Conn -> ChildList -> String -> [SqlValue] -> IO Integer
+frun :: Conn -> ChildList -> B.ByteString -> [SqlValue] -> IO Integer
 frun o children query args =
     do sth <- newSth o children query
        res <- execute sth args
@@ -140,7 +140,7 @@ frollback o cl =  do _ <- frun o cl "ROLLBACK" []
                      begin_transaction o cl
 
 fgetTables conn children =
-    do sth <- newSth conn children 
+    do sth <- newSth conn children
               "select table_name from information_schema.tables where \
                \table_schema != 'pg_catalog' AND table_schema != \
                \'information_schema'"
@@ -149,31 +149,31 @@ fgetTables conn children =
        let res = map fromSql $ concat res1
        return $ seq (length res) res
 
-fdescribeTable :: Conn -> ChildList -> String -> IO [(String, SqlColDesc)]
+fdescribeTable :: Conn -> ChildList -> B.ByteString -> IO [(B.ByteString, SqlColDesc)]
 fdescribeTable o cl table = fdescribeSchemaTable o cl Nothing table
 
-fdescribeSchemaTable :: Conn -> ChildList -> Maybe String -> String -> IO [(String, SqlColDesc)]
+fdescribeSchemaTable :: Conn -> ChildList -> Maybe B.ByteString -> B.ByteString -> IO [(B.ByteString, SqlColDesc)]
 fdescribeSchemaTable o cl maybeSchema table =
-    do sth <- newSth o cl 
-              ("SELECT attname, atttypid, attlen, format_type(atttypid, atttypmod), attnotnull " ++
-               "FROM pg_attribute, pg_class, pg_namespace ns " ++
-               "WHERE relname = ? and attnum > 0 and attisdropped IS FALSE " ++
-               (if isJust maybeSchema then "and ns.nspname = ? " else "") ++
-               "and attrelid = pg_class.oid and relnamespace = ns.oid order by attnum")
+    do sth <- newSth o cl $ B.concat
+              ["SELECT attname, atttypid, attlen, format_type(atttypid, atttypmod), attnotnull\
+              \ FROM pg_attribute, pg_class, pg_namespace ns\
+              \ WHERE relname = ? and attnum > 0 and attisdropped IS FALSE "
+              , if isJust maybeSchema then "and ns.nspname = ? " else ""
+              ,"and attrelid = pg_class.oid and relnamespace = ns.oid order by attnum" ]
        let params = toSql table : (if isJust maybeSchema then [toSql $ fromJust maybeSchema] else [])
        _ <- execute sth params
        res <- fetchAllRows' sth
        return $ map desccol res
     where
       desccol [attname, atttypid, attlen, formattedtype, attnotnull] =
-          (fromSql attname, 
+          (fromSql attname,
            colDescForPGAttr (fromSql atttypid) (fromSql attlen) (fromSql formattedtype) (fromSql attnotnull == False))
       desccol x =
           error $ "Got unexpected result from pg_attribute: " ++ show x
-         
+
 
 fdisconnect :: Conn -> ChildList -> IO ()
-fdisconnect conn mchildren = 
+fdisconnect conn mchildren =
     do closeAllChildren mchildren
        withRawConn conn $ pqfinish
 

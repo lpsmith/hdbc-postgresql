@@ -36,6 +36,7 @@ import Data.Ratio
 import System.IO
 import qualified Data.ByteString as B
 import qualified Data.ByteString.UTF8 as BUTF8
+import Data.ByteString.Char8()
 import Database.HDBC.PostgreSQL.Parser(convertSQL)
 import Database.HDBC.DriverUtils
 import Database.HDBC.PostgreSQL.PTypeConv
@@ -52,24 +53,25 @@ data SState =
     SState { stomv :: MVar (Maybe Stmt),
              nextrowmv :: MVar (CInt), -- -1 for no next row (empty); otherwise, next row to read.
              dbo :: Conn,
-             squery :: String,
-             coldefmv :: MVar [(String, SqlColDesc)]}
+             squery :: B.ByteString,
+             coldefmv :: MVar [(B.ByteString, SqlColDesc)]}
 
 -- FIXME: we currently do no prepare optimization whatsoever.
 
-newSth :: Conn -> ChildList -> String -> IO Statement
+newSth :: Conn -> ChildList -> B.ByteString -> IO Statement
 newSth indbo mchildren query =
     do l "in newSth"
        newstomv <- newMVar Nothing
        newnextrowmv <- newMVar (-1)
        newcoldefmv <- newMVar []
-       usequery <- case convertSQL query of
+       -- FIXME?  Rewrite Database.HDBC.PostgreSQL.convertSQL to avoid unpacking the query
+       usequery <- case convertSQL (BUTF8.toString query) of
                       Left errstr -> throwSqlError $ SqlError
                                       {seState = "",
                                        seNativeError = (-1),
-                                       seErrorMsg = "hdbc prepare: " ++
-                                                    show errstr}
-                      Right converted -> return converted
+                                       seErrorMsg = B.concat ["hdbc prepare: ", 
+                                                    BUTF8.fromString (show errstr)]}
+                      Right converted -> return (BUTF8.fromString converted)
        let sstate = SState {stomv = newstomv, nextrowmv = newnextrowmv,
                             dbo = indbo, squery = usequery,
                             coldefmv = newcoldefmv}
@@ -85,12 +87,12 @@ newSth indbo mchildren query =
        addChild mchildren retval
        return retval
 
-fgetColumnNames :: SState -> IO [(String)]
+fgetColumnNames :: SState -> IO [B.ByteString]
 fgetColumnNames sstate =
     do c <- readMVar (coldefmv sstate)
        return (map fst c)
 
-fdescribeResult :: SState -> IO [(String, SqlColDesc)]
+fdescribeResult :: SState -> IO [(B.ByteString, SqlColDesc)]
 fdescribeResult sstate =
     readMVar (coldefmv sstate)
 
@@ -98,7 +100,7 @@ fdescribeResult sstate =
 FIXME lots of room for improvement here (types, etc). -}
 fexecute :: (Num a, Read a) => SState -> [SqlValue] -> IO a
 fexecute sstate args = withConnLocked (dbo sstate) $ \cconn ->
-                       B.useAsCString (BUTF8.fromString (squery sstate)) $ \cquery ->
+                       B.useAsCString (squery sstate) $ \cquery ->
                        withCStringArr0 args $ \cargs -> -- wichSTringArr0 uses UTF-8
     do l "in fexecute"
        public_ffinish sstate    -- Sets nextrowmv to -1
@@ -112,7 +114,7 @@ fexecute sstate args = withConnLocked (dbo sstate) $ \cconn ->
 fexecuteRaw :: SState -> IO ()
 fexecuteRaw sstate =
     withConnLocked (dbo sstate) $ \cconn ->
-        B.useAsCString (BUTF8.fromString (squery sstate)) $ \cquery ->
+        B.useAsCString (squery sstate) $ \cquery ->
             do l "in fexecute"
                public_ffinish sstate    -- Sets nextrowmv to -1
                resptr <- pqexec cconn cquery
@@ -123,12 +125,12 @@ handleResultStatus :: (Num a, Read a) => Ptr CConn -> WrappedCStmt -> SState -> 
 handleResultStatus cconn resptr sstate status =
     case status of
       #{const PGRES_EMPTY_QUERY} ->
-          do l $ "PGRES_EMPTY_QUERY: " ++ squery sstate
+          do l $ "PGRES_EMPTY_QUERY: " ++ BUTF8.toString (squery sstate)
              pqclear_raw resptr
              swapMVar (coldefmv sstate) []
              return 0
       #{const PGRES_COMMAND_OK} ->
-          do l $ "PGRES_COMMAND_OK: " ++ squery sstate
+          do l $ "PGRES_COMMAND_OK: " ++ BUTF8.toString (squery sstate)
              rowscs <- pqcmdTuples resptr
              rows <- peekCString rowscs
              pqclear_raw resptr
@@ -137,7 +139,7 @@ handleResultStatus cconn resptr sstate status =
                         "" -> 0
                         x -> read x
       #{const PGRES_TUPLES_OK} ->
-          do l $ "PGRES_TUPLES_OK: " ++ squery sstate
+          do l $ "PGRES_TUPLES_OK: " ++ BUTF8.toString (squery sstate)
              fgetcoldef resptr >>= swapMVar (coldefmv sstate)
              numrows <- pqntuples resptr
              if numrows < 1 then (pqclear_raw resptr >> return 0) else
@@ -149,16 +151,16 @@ handleResultStatus cconn resptr sstate status =
                    swapMVar (stomv sstate) (Just fresptr)
                    return 0
       _ | resptr == nullPtr -> do
-              l $ "PGRES ERROR: " ++ squery sstate
+              l $ "PGRES ERROR: " ++ BUTF8.toString (squery sstate)
               errormsg  <- peekCStringUTF8 =<< pqerrorMessage cconn
               statusmsg <- peekCStringUTF8 =<< pqresStatus status
 
               throwSqlError $ SqlError { seState = "E"
                                        , seNativeError = fromIntegral status
-                                       , seErrorMsg = "execute: " ++ statusmsg ++
-                                                      ": " ++ errormsg}
+                                       , seErrorMsg = B.concat [ "execute: ", statusmsg
+                                                               , ": ", errormsg ] }
 
-      _ -> do l $ "PGRES ERROR: " ++ squery sstate
+      _ -> do l $ "PGRES ERROR: " ++ BUTF8.toString (squery sstate)
               errormsg  <- peekCStringUTF8 =<< pqresultErrorMessage resptr
               statusmsg <- peekCStringUTF8 =<< pqresStatus status
               state     <- peekCStringUTF8 =<<
@@ -167,15 +169,15 @@ handleResultStatus cconn resptr sstate status =
               pqclear_raw resptr
               throwSqlError $ SqlError { seState = state
                                        , seNativeError = fromIntegral status
-                                       , seErrorMsg = "execute: " ++ statusmsg ++
-                                                      ": " ++ errormsg}
+                                       , seErrorMsg = B.concat [ "execute: ", statusmsg
+                                                               , ": ",  errormsg ]}
 
-peekCStringUTF8 :: CString -> IO String
+peekCStringUTF8 :: CString -> IO B.ByteString
 -- Marshal a NUL terminated C string into a Haskell string, decoding it
 -- with UTF8.
 peekCStringUTF8 str
    | str == nullPtr  = return ""
-   | otherwise       = fmap BUTF8.toString (B.packCString str)
+   | otherwise       = B.packCString str
 
 
 
@@ -214,12 +216,12 @@ ffetchrow sstate = modifyMVar (nextrowmv sstate) dofetchrow
 
 
 
-fgetcoldef :: Ptr CStmt -> IO [(String, SqlColDesc)]
+fgetcoldef :: Ptr CStmt -> IO [(B.ByteString, SqlColDesc)]
 fgetcoldef cstmt =
     do ncols <- pqnfields cstmt
        mapM desccol [0..(ncols - 1)]
     where desccol i =
-              do colname <- peekCStringUTF8 =<< pqfname cstmt i 
+              do colname <- peekCStringUTF8 =<< pqfname cstmt i
                  coltype <- pqftype cstmt i
                  --coloctets <- pqfsize
                  let coldef = oidToColDef coltype

@@ -21,6 +21,7 @@ module Database.HDBC.PostgreSQL.PTypeConv where
 import Database.HDBC.ColTypes
 import Data.Word
 import Data.Int
+import qualified Data.ByteString.Char8 as B8
 
 #include "pgtypes.h"
 #include <libpq-fe.h>
@@ -101,4 +102,4 @@ oidToColType oid =
       #{const PG_TYPE_RELTIME}   -> SqlIntervalT SqlIntervalMonthT -- of an interval (microsecond to millennium) to be specified together.
       1186 -> SqlIntervalT SqlIntervalMonthT
       #{const PG_TYPE_BOOL} -> SqlBitT
-      x -> SqlUnknownT (show x)
+      x -> SqlUnknownT (B8.pack (show x))

@@ -20,24 +20,25 @@ module Database.HDBC.PostgreSQL.ConnectionImpl where
 
 import qualified Database.HDBC.Types as Types
 import Database.HDBC.ColTypes as ColTypes
+import Data.ByteString ( ByteString )
 
 data Connection = 
     Connection {
                 disconnect :: IO (),
                 commit :: IO (),
                 rollback :: IO (),
-                runRaw :: String -> IO (),
-                run :: String -> [Types.SqlValue] -> IO Integer,
-                prepare :: String -> IO Types.Statement,
+                runRaw :: ByteString -> IO (),
+                run :: ByteString -> [Types.SqlValue] -> IO Integer,
+                prepare :: ByteString -> IO Types.Statement,
                 clone :: IO Connection,
-                hdbcDriverName :: String,
-                hdbcClientVer :: String,
-                proxiedClientName :: String,
-                proxiedClientVer :: String,
-                dbServerVer :: String,
+                hdbcDriverName :: ByteString,
+                hdbcClientVer :: ByteString,
+                proxiedClientName :: ByteString,
+                proxiedClientVer :: ByteString,
+                dbServerVer :: ByteString,
                 dbTransactionSupport :: Bool,
-                getTables :: IO [String],
-                describeTable :: String -> IO [(String, ColTypes.SqlColDesc)]
+                getTables :: IO [ByteString],
+                describeTable :: ByteString -> IO [(ByteString, ColTypes.SqlColDesc)]
                }
 
 instance Types.IConnection Connection where
