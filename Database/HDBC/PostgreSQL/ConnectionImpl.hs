@@ -21,6 +21,7 @@ module Database.HDBC.PostgreSQL.ConnectionImpl where
 import qualified Database.HDBC.Types as Types
 import Database.HDBC.ColTypes as ColTypes
 import Data.ByteString ( ByteString )
+import Database.HDBC.PostgreSQL.Types (Conn)
 
 data Connection = 
     Connection {
@@ -38,7 +39,8 @@ data Connection =
                 dbServerVer :: ByteString,
                 dbTransactionSupport :: Bool,
                 getTables :: IO [ByteString],
-                describeTable :: ByteString -> IO [(ByteString, ColTypes.SqlColDesc)]
+                describeTable :: ByteString -> IO [(ByteString, ColTypes.SqlColDesc)],
+                conn :: Conn
                }
 
 instance Types.IConnection Connection where

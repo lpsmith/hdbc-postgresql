@@ -101,7 +101,8 @@ mkConn args conn = withConn conn $
                             Impl.dbServerVer = BUTF8.fromString (show serverver),
                             Impl.dbTransactionSupport = True,
                             Impl.getTables = fgetTables conn children,
-                            Impl.describeTable = fdescribeTable conn children}
+                            Impl.describeTable = fdescribeTable conn children,
+                            Impl.conn = conn }
        _ <- quickQuery rconn "SET client_encoding TO utf8;" []
        return rconn
 

@@ -28,7 +28,8 @@ Flag buildtests
   default: False
 
 Library
-  Exposed-Modules: Database.HDBC.PostgreSQL
+  Exposed-Modules: Database.HDBC.PostgreSQL,  
+    Database.HDBC.PostgreSQL.LargeObjects
   Other-Modules: Database.HDBC.PostgreSQL.Connection,
     Database.HDBC.PostgreSQL.ConnectionImpl,
     Database.HDBC.PostgreSQL.Statement,
