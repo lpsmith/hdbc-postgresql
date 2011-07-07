@@ -34,9 +34,9 @@ loImport connection filepath
         withCString filepath $ \f -> do
           toMaybeOid `fmap` c_lo_import c f
 
-loExport :: Conn -> Oid -> FilePath -> IO CInt
+loExport :: Impl.Connection -> Oid -> FilePath -> IO CInt
 loExport connection oid filepath
-    = withConnLocked connection $ \c -> do
+    = withConnLocked (Impl.conn connection) $ \c -> do
         withCString filepath $ \f -> do
           c_lo_export c oid f
 
