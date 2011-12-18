@@ -10,7 +10,7 @@
 -----------------------------------------------------------------------------
 
 
-module Database.HDBC.PostgreSQL.LargeObjects (loImport, loExport) where
+module Database.HDBC.PostgreSQL.LargeObjects (loImport, loExport, Oid) where
 
 #include <libpq/libpq-fs.h>
 
